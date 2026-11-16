@@ -426,6 +426,7 @@ pdfModal.addEventListener('click', (event) => {
 });
 
 async function initDashboard() {
+  initQuoteRotator(dashboardQuoteEl);
   if (!getToken()) {
     window.location.href = '/login.html';
     return;

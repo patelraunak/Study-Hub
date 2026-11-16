@@ -1,4 +1,8 @@
 import { apiRequest, getToken, saveSession } from './api.js';
+import { initQuoteRotator } from './quotes.js';
+
+const loginQuoteEl = document.getElementById('login-quote-rotator');
+initQuoteRotator(loginQuoteEl);
 
 const tabLoginBtn = document.getElementById('tab-login');
 const tabRegisterBtn = document.getElementById('tab-register');

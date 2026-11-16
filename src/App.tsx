@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { FileText } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import { renderTeam } from '../studyhub/frontend/js/team.js';
+import { initQuoteRotator } from '../studyhub/frontend/js/quotes.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -230,6 +232,52 @@ function PdfThumbnail({ dataUrl, title, onClick }: PdfThumbnailProps) {
 const glassSurfaceClass =
   'bg-white/60 backdrop-blur-xl border border-white/70 shadow-lg shadow-slate-900/5 rounded-2xl';
 
+function QuoteRotatorBox({ light = false }: { light?: boolean }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return undefined;
+    return initQuoteRotator(node);
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`quote-rotator ${light ? 'quote-rotator-light' : ''}`}
+    />
+  );
+}
+
+function TechnicalTeamMount({ activeKey }: { activeKey: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const setTeamNode = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    if (node) {
+      renderTeam(node);
+    }
+  }, []);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return undefined;
+
+    renderTeam(node);
+
+    const observer = new MutationObserver(() => {
+      if (node.children.length === 0) {
+        renderTeam(node);
+      }
+    });
+
+    observer.observe(node, { childList: true });
+    return () => observer.disconnect();
+  }, [activeKey]);
+
+  return <div ref={setTeamNode} id="team-grid" className="team-grid" />;
+}
+
 export default function App() {
   const shouldReduceMotion = useReducedMotion();
   const [isScrolled, setIsScrolled] = useState(false);
@@ -280,6 +328,26 @@ export default function App() {
 
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [activePdfNote, setActivePdfNote] = useState<NoteRecord | null>(null);
+
+  function scrollToAbout(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    const doScroll = () => {
+      const grid = document.getElementById('team-grid');
+      if (grid && grid.children.length === 0) {
+        renderTeam(grid);
+      }
+      const target = document.getElementById('about');
+      if (target) {
+        target.scrollIntoView({ behavior: shouldReduceMotion ? 'auto' : 'smooth' });
+      }
+    };
+    if (page !== 'catalog') {
+      setPage('catalog');
+      setTimeout(doScroll, 240);
+    } else {
+      doScroll();
+    }
+  }
 
   useEffect(() => {
     const handleScroll = () => {
@@ -695,36 +763,66 @@ export default function App() {
             Study Hub
           </button>
 
-          <nav className="flex items-center gap-6 text-sm font-semibold text-slate-600">
-            {navItems.map((item) => {
-              const isActive = page === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setCatalogStatus(null);
-                    if (item.id === 'dashboard' && !currentUser) {
-                      setPage('login');
-                    } else {
-                      setPage(item.id);
-                    }
-                  }}
-                  className={`relative py-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    isActive ? 'text-slate-900' : 'hover:text-slate-900'
-                  }`}
-                >
-                  {item.label}
-                  {isActive && (
-                    <motion.span
-                      layoutId="navbar-active-underline"
-                      className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-700 rounded-full"
-                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                    />
-                  )}
-                </button>
-              );
-            })}
+          <nav className="flex items-center gap-6 text-sm font-bold text-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setCatalogStatus(null);
+                setPage('catalog');
+              }}
+              className={`relative py-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                page === 'catalog' ? 'text-slate-950' : 'text-slate-800 hover:text-slate-950'
+              }`}
+            >
+              Browse Notes
+              {page === 'catalog' && (
+                <motion.span
+                  layoutId="navbar-active-underline"
+                  className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-700 rounded-full"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+            </button>
+
+            <a
+              href="#about"
+              onClick={scrollToAbout}
+              className="relative py-1.5 text-slate-900 font-bold transition-colors whitespace-nowrap shrink-0 hover:text-blue-700 cursor-pointer"
+            >
+              About
+            </a>
+
+            {navItems
+              .filter((item) => item.id !== 'catalog')
+              .map((item) => {
+                const isActive = page === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setCatalogStatus(null);
+                      if (item.id === 'dashboard' && !currentUser) {
+                        setPage('login');
+                      } else {
+                        setPage(item.id);
+                      }
+                    }}
+                    className={`relative py-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      isActive ? 'text-slate-950' : 'text-slate-800 hover:text-slate-950'
+                    }`}
+                  >
+                    {item.label}
+                    {isActive && (
+                      <motion.span
+                        layoutId="navbar-active-underline"
+                        className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-700 rounded-full"
+                        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
           </nav>
 
           <div className="flex items-center gap-3 shrink-0">
@@ -820,6 +918,7 @@ export default function App() {
                         Upload structured PDF notes by course subject and unit so classmates can
                         review and download verified study material.
                       </p>
+                      <QuoteRotatorBox light />
                     </div>
                   </div>
 
@@ -1323,6 +1422,7 @@ export default function App() {
                     <h2 className="text-base font-bold">
                       Share Lecture PDFs & Study Guides Across Courses
                     </h2>
+                    <QuoteRotatorBox light />
                   </div>
                 </div>
 
@@ -1388,6 +1488,14 @@ export default function App() {
                     <span aria-hidden="true">·</span>
                     <span className="font-mono">{currentUser.role}</span>
                   </div>
+                </motion.section>
+
+                <motion.section
+                  variants={fadeUpItemVariants}
+                  className="dashboard-quote-banner"
+                  aria-label="Study Inspiration"
+                >
+                  <QuoteRotatorBox />
                 </motion.section>
 
                 <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-7 items-start">
@@ -1773,7 +1881,104 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <div id="about" className="about-wrapper">
+          <section className="vision-section" aria-labelledby="vision-heading">
+            <div className="vision-header">
+              <h2 id="vision-heading" className="section-heading">
+                Our Vision
+              </h2>
+              <p className="vision-lead">
+                We believe good notes should never stay buried in a chat group or a forgotten
+                folder. Study Hub is built to bring every student's study material into one
+                organized, searchable place, so learning is easier to share, faster to revise and
+                open to everyone on campus.
+              </p>
+            </div>
+            <div className="vision-grid">
+              <article className="vision-card">
+                <div className="vision-icon" aria-hidden="true">
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                </div>
+                <h3 className="vision-card-title">Organized</h3>
+                <p className="vision-card-text">Every note sorted by subject, unit and topic.</p>
+              </article>
+
+              <article className="vision-card">
+                <div className="vision-icon" aria-hidden="true">
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                </div>
+                <h3 className="vision-card-title">Shared</h3>
+                <p className="vision-card-text">
+                  Students helping students, one upload at a time.
+                </p>
+              </article>
+
+              <article className="vision-card">
+                <div className="vision-icon" aria-hidden="true">
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                  </svg>
+                </div>
+                <h3 className="vision-card-title">Smarter</h3>
+                <p className="vision-card-text">
+                  Summaries, flashcards and quizzes built from the notes.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section className="team-section" aria-labelledby="team-heading">
+            <h2 id="team-heading" className="section-heading">
+              Meet the Technical Team
+            </h2>
+            <TechnicalTeamMount activeKey={`${page}-${filteredNotes.length}`} />
+          </section>
+        </div>
       </main>
+
+      <footer className="site-footer">
+        <div className="site-footer-inner">
+          <span>Study Hub</span>
+          <span aria-hidden="true">·</span>
+          <span>Campus Study Notes Repository</span>
+        </div>
+      </footer>
 
       <AnimatePresence>
         {activePdfNote && (

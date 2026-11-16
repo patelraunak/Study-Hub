@@ -1,216 +1,78 @@
-export const STUDY_QUOTES = [
-  "Small notes today, big marks tomorrow.",
-  "Revision is where understanding becomes memory.",
-  "Start with one page. Momentum does the rest.",
-  "Good notes save the hours you haven't lived yet.",
-  "Share what you know. Learn it twice.",
-  "Consistency beats cramming.",
-  "Every topic feels hard until you have studied it twice.",
-  "Today's effort is tomorrow's exam confidence.",
-  "Ask the question. Someone else is wondering too.",
-  "Progress counts, even when it is slow.",
-  "Clear summaries turn complex chapters into simple steps.",
-  "One focused hour beats four distracted ones.",
-  "Write it in your own words to make it stick.",
-  "A tidy notebook is a calm mind on exam morning.",
-  "Reviewing for ten minutes tonight saves an hour next month.",
-  "Understanding the why makes the how effortless.",
-  "Every solved problem builds the next intuition.",
-  "Short study blocks build lasting academic habits.",
-  "Organize by unit today so revision flows tomorrow.",
-  "Master the fundamentals and advanced topics follow.",
-  "Steady daily reading outperforms midnight marathons.",
-  "Test yourself early to discover what needs attention.",
-  "Shared study notes lift the whole classroom.",
-  "Break large syllabi into one unit at a time.",
-  "Patience with difficult concepts pays off in clarity."
+export const studyQuotes = [
+  'Clear notes turn complex lectures into lasting understanding.',
+  'Organizing what you learn today saves hours before the final exam.',
+  'Shared knowledge strengthens the entire lecture hall.',
+  'A well-structured summary is the bridge between reading and mastery.',
+  'Consistent daily review outperforms last-minute cramming every semester.',
+  'Writing down a concept in your own words is the first test of comprehension.',
+  'Every unit mastered builds the foundation for the next course.',
+  'Good study material should be easy to find, easy to read, and open to all.',
+  'Questions become simpler when your reference notes are arranged by topic.',
+  'Collaboration turns individual study sessions into collective progress.',
+  'Precision in your notes leads to clarity in your problem solving.',
+  'Revisiting lecture outlines within twenty-four hours locks in key ideas.',
+  'The best exam preparation starts with a clean, searchable archive.',
+  'Understanding the core principle makes memorizing ten formulas unnecessary.',
+  'A single shared PDF can help an entire class master a difficult unit.',
+  'Steady focus in small blocks accomplishes more than marathon distractions.',
+  'Structure your subjects clearly so your mind can focus on thinking.',
+  'Learning deepens when students teach and share with one another.',
+  'Strong fundamentals turn unfamiliar exam problems into familiar steps.',
+  'Reviewing worked examples side by side reveals the underlying pattern.',
+  'Curiosity asks the question; disciplined notes preserve the answer.',
+  'When course materials are organized by unit, revision becomes effortless.',
+  'Every clear diagram and summary uploaded helps the next student succeed.',
+  'Mastery is built one lecture, one unit, and one page at a time.',
+  'Knowledge grows fastest in a community that shares its best resources.',
 ];
-
-const ROTATION_INTERVAL_MS = 6000;
-const FADE_DURATION_MS = 500;
-const MAX_VISIBLE_DOTS = 5;
-const activeControllers = new WeakMap();
-
-function buildShuffledIndices(total, excludeFirst = -1) {
-  const indices = Array.from({ length: total }, (_, idx) => idx);
-  for (let i = indices.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const temp = indices[i];
-    indices[i] = indices[j];
-    indices[j] = temp;
-  }
-  if (indices.length > 1 && indices[0] === excludeFirst) {
-    const swapIdx = 1 + Math.floor(Math.random() * (indices.length - 1));
-    const first = indices[0];
-    indices[0] = indices[swapIdx];
-    indices[swapIdx] = first;
-  }
-  return indices;
-}
 
 export function initQuoteRotator(containerElement) {
   if (!containerElement) return () => {};
 
-  const existingCleanup = activeControllers.get(containerElement);
-  if (typeof existingCleanup === 'function') {
-    existingCleanup();
+  if (containerElement._quoteTimerId) {
+    clearInterval(containerElement._quoteTimerId);
+    containerElement._quoteTimerId = null;
+  }
+  if (containerElement._quoteFadeTimeoutId) {
+    clearTimeout(containerElement._quoteFadeTimeoutId);
+    containerElement._quoteFadeTimeoutId = null;
   }
 
-  const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  let queue = buildShuffledIndices(STUDY_QUOTES.length);
-  let queuePosition = 0;
-  let currentQuoteIndex = queue[queuePosition];
-  let intervalId = null;
-  let fadeTimeoutId = null;
-  let isInteracting = false;
-  let isDestroyed = false;
+  let currentIndex = 0;
+  containerElement.innerHTML = '';
 
-  containerElement.innerHTML = `
-    <div class="quote-rotator-inner" tabindex="0">
-      <p class="quote-rotator-text" aria-live="polite" aria-atomic="true"></p>
-      <div class="quote-rotator-dots" role="tablist" aria-label="Study quote navigation"></div>
-    </div>
-  `;
+  const quoteTextEl = document.createElement('p');
+  quoteTextEl.className = 'quote-rotator-text';
+  quoteTextEl.setAttribute('aria-live', 'polite');
+  quoteTextEl.textContent = `"${studyQuotes[currentIndex]}"`;
+  containerElement.appendChild(quoteTextEl);
 
-  const wrapperEl = containerElement.querySelector('.quote-rotator-inner');
-  const textEl = containerElement.querySelector('.quote-rotator-text');
-  const dotsEl = containerElement.querySelector('.quote-rotator-dots');
+  const advanceQuote = () => {
+    currentIndex = (currentIndex + 1) % studyQuotes.length;
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  function renderDots() {
-    if (!dotsEl) return;
-    const total = queue.length;
-    const windowSize = Math.min(MAX_VISIBLE_DOTS, total);
-    let start = queuePosition - Math.floor(windowSize / 2);
-    if (start < 0) start = 0;
-    if (start + windowSize > total) start = Math.max(0, total - windowSize);
-
-    dotsEl.innerHTML = '';
-    for (let pos = start; pos < start + windowSize; pos += 1) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `quote-dot${pos === queuePosition ? ' active' : ''}`;
-      btn.setAttribute('aria-label', `Show quote ${pos + 1}`);
-      btn.setAttribute('aria-selected', pos === queuePosition ? 'true' : 'false');
-      btn.addEventListener('click', () => {
-        if (pos === queuePosition) return;
-        queuePosition = pos;
-        currentQuoteIndex = queue[queuePosition];
-        transitionToQuote(STUDY_QUOTES[currentQuoteIndex]);
-        restartTimer();
-      });
-      dotsEl.appendChild(btn);
-    }
-  }
-
-  function transitionToQuote(nextText) {
-    if (!textEl || isDestroyed) return;
-    if (fadeTimeoutId) {
-      clearTimeout(fadeTimeoutId);
-      fadeTimeoutId = null;
-    }
-
-    if (reducedMotionQuery.matches) {
-      textEl.textContent = `"${nextText}"`;
-      textEl.classList.remove('is-fading');
-      renderDots();
+    if (reduceMotion) {
+      quoteTextEl.textContent = `"${studyQuotes[currentIndex]}"`;
       return;
     }
 
-    textEl.classList.add('is-fading');
-    fadeTimeoutId = window.setTimeout(() => {
-      if (isDestroyed || !textEl) return;
-      textEl.textContent = `"${nextText}"`;
-      renderDots();
-      requestAnimationFrame(() => {
-        if (!isDestroyed && textEl) {
-          textEl.classList.remove('is-fading');
-        }
-      });
-    }, FADE_DURATION_MS / 2);
-  }
+    quoteTextEl.classList.add('quote-fading');
+    containerElement._quoteFadeTimeoutId = setTimeout(() => {
+      quoteTextEl.textContent = `"${studyQuotes[currentIndex]}"`;
+      quoteTextEl.classList.remove('quote-fading');
+    }, 240);
+  };
 
-  function advanceQuote() {
-    if (isDestroyed || isInteracting || document.hidden) return;
-    queuePosition += 1;
-    if (queuePosition >= queue.length) {
-      queue = buildShuffledIndices(STUDY_QUOTES.length, currentQuoteIndex);
-      queuePosition = 0;
+  const timerId = setInterval(advanceQuote, 6000);
+  containerElement._quoteTimerId = timerId;
+
+  return () => {
+    clearInterval(timerId);
+    if (containerElement._quoteFadeTimeoutId) {
+      clearTimeout(containerElement._quoteFadeTimeoutId);
     }
-    currentQuoteIndex = queue[queuePosition];
-    transitionToQuote(STUDY_QUOTES[currentQuoteIndex]);
-  }
-
-  function stopTimer() {
-    if (intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-  }
-
-  function startTimer() {
-    if (isDestroyed || intervalId !== null || isInteracting || document.hidden) return;
-    intervalId = window.setInterval(advanceQuote, ROTATION_INTERVAL_MS);
-  }
-
-  function restartTimer() {
-    stopTimer();
-    startTimer();
-  }
-
-  function handlePause() {
-    isInteracting = true;
-    stopTimer();
-  }
-
-  function handleResume() {
-    isInteracting = false;
-    startTimer();
-  }
-
-  function handleVisibilityChange() {
-    if (document.hidden) {
-      stopTimer();
-    } else {
-      startTimer();
-    }
-  }
-
-  textEl.textContent = `"${STUDY_QUOTES[currentQuoteIndex]}"`;
-  renderDots();
-  startTimer();
-
-  wrapperEl.addEventListener('mouseenter', handlePause);
-  wrapperEl.addEventListener('mouseleave', handleResume);
-  wrapperEl.addEventListener('focusin', handlePause);
-  wrapperEl.addEventListener('focusout', handleResume);
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-
-  const observer = new MutationObserver(() => {
-    if (!document.body.contains(containerElement)) {
-      cleanup();
-    }
-  });
-  if (document.body) {
-    observer.observe(document.body, { childList: true, subtree: true });
-  }
-
-  function cleanup() {
-    if (isDestroyed) return;
-    isDestroyed = true;
-    stopTimer();
-    if (fadeTimeoutId) {
-      clearTimeout(fadeTimeoutId);
-      fadeTimeoutId = null;
-    }
-    wrapperEl.removeEventListener('mouseenter', handlePause);
-    wrapperEl.removeEventListener('mouseleave', handleResume);
-    wrapperEl.removeEventListener('focusin', handlePause);
-    wrapperEl.removeEventListener('focusout', handleResume);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    observer.disconnect();
-    activeControllers.delete(containerElement);
-  }
-
-  activeControllers.set(containerElement, cleanup);
-  return cleanup;
+  };
 }

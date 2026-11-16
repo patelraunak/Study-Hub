@@ -8,6 +8,8 @@ import {
   renderPdfThumbnail,
   saveSession,
 } from './api.js';
+import { renderTeam } from './team.js';
+import { initQuoteRotator } from './quotes.js';
 
 const searchInput = document.getElementById('search-input');
 const categorySelect = document.getElementById('category-filter');
@@ -18,6 +20,9 @@ const notesContainer = document.getElementById('notes-container');
 const notesCountEl = document.getElementById('notes-count');
 const statusBanner = document.getElementById('status-banner');
 const topActionContainer = document.getElementById('top-action-container');
+const teamGridEl = document.getElementById('team-grid');
+const aboutNavLink = document.getElementById('about-nav-link');
+const heroQuoteEl = document.getElementById('hero-quote-rotator');
 
 const pdfModal = document.getElementById('pdf-modal');
 const pdfModalTitle = document.getElementById('pdf-modal-title');
@@ -329,6 +334,16 @@ resetBtn.addEventListener('click', () => {
   loadNotes();
 });
 
+if (aboutNavLink) {
+  aboutNavLink.addEventListener('click', (event) => {
+    const target = document.getElementById('about');
+    if (!target) return;
+    event.preventDefault();
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
+  });
+}
+
 pdfModalClose.addEventListener('click', closePdfViewer);
 pdfModal.addEventListener('click', (event) => {
   if (event.target === pdfModal) {
@@ -336,10 +351,24 @@ pdfModal.addEventListener('click', (event) => {
   }
 });
 
+function ensureTeamRendered() {
+  const grid = document.getElementById('team-grid');
+  if (grid && grid.children.length === 0) {
+    renderTeam(grid);
+  }
+}
+
+window.addEventListener('pageshow', ensureTeamRendered);
+window.addEventListener('popstate', ensureTeamRendered);
+window.addEventListener('hashchange', ensureTeamRendered);
+
 async function init() {
+  initQuoteRotator(heroQuoteEl);
+  renderTeam(teamGridEl);
   renderTopBarAction();
   await syncCurrentUser();
   await Promise.all([loadCategories(), loadNotes()]);
+  ensureTeamRendered();
 }
 
 init();
