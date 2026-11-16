@@ -23,7 +23,7 @@ export function renderTeam(containerElement) {
     card.className = 'team-card';
 
     const avatarSlot = document.createElement('div');
-    avatarSlot.className = 'team-photo-wrap';
+    avatarSlot.className = 'team-photo-wrap is-loading';
 
     const img = document.createElement('img');
     img.className = 'team-photo';
@@ -31,7 +31,13 @@ export function renderTeam(containerElement) {
     img.width = 128;
     img.height = 128;
     img.loading = 'lazy';
+    img.decoding = 'async';
     img.alt = `Photo of ${member.name}`;
+
+    img.addEventListener('load', () => {
+      avatarSlot.classList.remove('is-loading');
+      img.classList.add('is-loaded');
+    });
 
     img.addEventListener('error', () => {
       if (!img.dataset.retriedRoot) {
@@ -44,6 +50,7 @@ export function renderTeam(containerElement) {
         img.src = member.altImage;
         return;
       }
+      avatarSlot.classList.remove('is-loading');
       const fallback = document.createElement('div');
       fallback.className = 'team-initials-fallback';
       fallback.setAttribute('role', 'img');
