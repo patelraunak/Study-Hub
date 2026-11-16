@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Page Not Found — Study Hub</title>
+    <meta name="description" content="The requested page could not be found on Study Hub." />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <header class="top-bar">
+      <div class="top-bar-inner">
+        <a href="/index.html" class="brand-mark">Study Hub</a>
+        <nav class="top-nav" aria-label="Main Navigation">
+          <a href="/index.html" class="nav-link">Browse Notes</a>
+          <a href="/dashboard.html" class="nav-link">Dashboard</a>
+          <a href="/login.html" class="nav-link">Account</a>
+        </nav>
+        <div class="top-actions">
+          <a href="/index.html" class="btn btn-primary">Back to home</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <div id="not-found-empty"></div>
+    </main>
+
+    <script type="module">
+      import { renderEmptyState } from '/js/api.js';
+
+      const container = document.getElementById('not-found-empty');
+      renderEmptyState(container, {
+        title: '404 — Page not found',
+        message: 'The study page or resource you requested does not exist.',
+        actionLabel: 'Back to home',
+        actionHref: '/index.html',
+      });
+    </script>
+  </body>
+</html>

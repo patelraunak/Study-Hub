@@ -8,6 +8,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
+const IMG_LIBRARY_HALL = '/assets/aistudio/__ce35ffb7.jpeg';
+const IMG_STUDY_GROUP = '/assets/aistudio/843017624036572199_d3cd5671.jpeg';
+const IMG_DESK_COMPANION = '/assets/aistudio/655133077053441128_6da755e3.jpeg';
+
 interface UserRecord {
   id: number;
   name: string;
@@ -772,7 +776,7 @@ export default function App() {
               >
                 <motion.section
                   variants={fadeUpItemVariants}
-                  className="flex flex-wrap items-end justify-between gap-4 pb-5 mb-7 border-b border-slate-200/80"
+                  className="flex flex-wrap items-end justify-between gap-4 pb-5 mb-6 border-b border-slate-200/80"
                 >
                   <div>
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900">
@@ -786,6 +790,75 @@ export default function App() {
                   <div className="text-xs text-slate-600 font-mono tabular-nums">
                     {filteredNotes.length}{' '}
                     {filteredNotes.length === 1 ? 'study note' : 'study notes'} available
+                  </div>
+                </motion.section>
+
+                <motion.section
+                  variants={fadeUpItemVariants}
+                  className="grid grid-cols-1 lg:grid-cols-12 gap-4 mb-6 items-stretch"
+                >
+                  <div
+                    className={`lg:col-span-7 relative overflow-hidden ${glassSurfaceClass} min-h-[220px] flex flex-col justify-end p-6`}
+                  >
+                    <img
+                      src={IMG_LIBRARY_HALL}
+                      alt="University reading room desk with open lecture notes and laptop"
+                      referrerPolicy="no-referrer"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/45 to-transparent" />
+                    <div className="relative z-10 text-white">
+                      <div className="text-xs text-slate-200 mb-1">
+                        <span>Academic Archive</span>
+                        <span aria-hidden="true"> · </span>
+                        <span>Peer Repository</span>
+                      </div>
+                      <h2 className="text-xl font-bold tracking-tight">
+                        Shared University Reading Room & Course Summaries
+                      </h2>
+                      <p className="text-xs text-slate-200 mt-1 max-w-xl">
+                        Upload structured PDF notes by course subject and unit so classmates can
+                        review and download verified study material.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div
+                      className={`relative overflow-hidden ${glassSurfaceClass} min-h-[220px] flex flex-col justify-end p-4`}
+                    >
+                      <img
+                        src={IMG_STUDY_GROUP}
+                        alt="Students collaborating around study table with handwritten notebooks"
+                        referrerPolicy="no-referrer"
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/35 to-transparent" />
+                      <div className="relative z-10 text-white">
+                        <div className="text-xs text-slate-200">Collaborative Study</div>
+                        <p className="text-sm font-bold leading-snug mt-0.5">
+                          Handwritten & Typed Unit Notes
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`relative overflow-hidden ${glassSurfaceClass} min-h-[220px] flex flex-col justify-end p-4`}
+                    >
+                      <img
+                        src={IMG_DESK_COMPANION}
+                        alt="Late-night focused study desk workstation"
+                        referrerPolicy="no-referrer"
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/35 to-transparent" />
+                      <div className="relative z-10 text-white">
+                        <div className="text-xs text-slate-200">Exam Prep</div>
+                        <p className="text-sm font-bold leading-snug mt-0.5">
+                          Organized by Subject & Unit
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </motion.section>
 
@@ -896,14 +969,22 @@ export default function App() {
                 {filteredNotes.length === 0 ? (
                   <motion.div
                     variants={fadeUpItemVariants}
-                    className={`${glassSurfaceClass} py-14 px-6 text-center`}
+                    className={`${glassSurfaceClass} py-12 px-6 text-center`}
                   >
                     <motion.div
                       animate={shouldReduceMotion ? undefined : { y: [0, -7, 0] }}
                       transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
-                      className="mx-auto mb-4 w-12 h-12 rounded-2xl bg-blue-50/90 border border-blue-200/70 flex items-center justify-center text-blue-700 shadow-xs"
+                      className="mx-auto mb-4 flex flex-col items-center gap-3"
                     >
-                      <FileText className="w-6 h-6" />
+                      <div className="w-12 h-12 rounded-2xl bg-blue-50/90 border border-blue-200/70 flex items-center justify-center text-blue-700 shadow-xs">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <img
+                        src={IMG_DESK_COMPANION}
+                        alt="Study desk workstation"
+                        referrerPolicy="no-referrer"
+                        className="w-24 h-24 rounded-2xl object-cover border border-white/80 shadow-sm"
+                      />
                     </motion.div>
                     <h2 className="text-base font-bold text-slate-900 mb-1.5">
                       {searchQuery || selectedCategoryId || unitFilter
@@ -1042,9 +1123,13 @@ export default function App() {
           )}
 
           {page === 'login' && (
-            <motion.div key="page-login" {...pageTransitionProps} className="max-w-[460px] mx-auto my-8">
-              <div className={`${glassSurfaceClass} p-6`}>
-                <div className="inline-flex p-1 bg-slate-100/80 border border-slate-200/80 rounded-xl gap-1 mb-5">
+            <motion.div
+              key="page-login"
+              {...pageTransitionProps}
+              className="max-w-[920px] mx-auto my-6 grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch"
+            >
+              <div className={`${glassSurfaceClass} md:col-span-6 p-6 flex flex-col justify-center`}>
+                <div className="inline-flex self-start p-1 bg-slate-100/80 border border-slate-200/80 rounded-xl gap-1 mb-5">
                   <button
                     type="button"
                     onClick={() => {
@@ -1221,6 +1306,58 @@ export default function App() {
                   )}
                 </AnimatePresence>
               </div>
+
+              <div className="md:col-span-6 flex flex-col gap-4">
+                <div
+                  className={`relative overflow-hidden ${glassSurfaceClass} flex-1 min-h-[220px] flex flex-col justify-end p-6`}
+                >
+                  <img
+                    src={IMG_STUDY_GROUP}
+                    alt="Students studying together with course notebooks"
+                    referrerPolicy="no-referrer"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-900/40 to-transparent" />
+                  <div className="relative z-10 text-white">
+                    <div className="text-xs text-slate-200 mb-1">Student Community</div>
+                    <h2 className="text-base font-bold">
+                      Share Lecture PDFs & Study Guides Across Courses
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div
+                    className={`relative overflow-hidden ${glassSurfaceClass} h-36 flex flex-col justify-end p-4`}
+                  >
+                    <img
+                      src={IMG_LIBRARY_HALL}
+                      alt="University reading room"
+                      referrerPolicy="no-referrer"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
+                    <span className="relative z-10 text-xs font-semibold text-white">
+                      Library Archives
+                    </span>
+                  </div>
+
+                  <div
+                    className={`relative overflow-hidden ${glassSurfaceClass} h-36 flex flex-col justify-end p-4`}
+                  >
+                    <img
+                      src={IMG_DESK_COMPANION}
+                      alt="Late night desk session"
+                      referrerPolicy="no-referrer"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
+                    <span className="relative z-10 text-xs font-semibold text-white">
+                      Focused Study
+                    </span>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
 
@@ -1258,6 +1395,27 @@ export default function App() {
                     variants={fadeUpItemVariants}
                     className={`${glassSurfaceClass} p-6`}
                   >
+                    <div className="grid grid-cols-3 gap-2 mb-5">
+                      <img
+                        src={IMG_LIBRARY_HALL}
+                        alt="Library reading desk"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-16 object-cover rounded-xl border border-white/70"
+                      />
+                      <img
+                        src={IMG_STUDY_GROUP}
+                        alt="Group study table"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-16 object-cover rounded-xl border border-white/70"
+                      />
+                      <img
+                        src={IMG_DESK_COMPANION}
+                        alt="Study desk workstation"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-16 object-cover rounded-xl border border-white/70"
+                      />
+                    </div>
+
                     <h2 className="text-lg font-bold text-slate-900 mb-1">Upload PDF Note</h2>
                     <p className="text-xs text-slate-600 mb-5">
                       PDF documents only, maximum file size 10 MB. Stored under a UUID filename.
