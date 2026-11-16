@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Study Hub — College Study Notes Repository</title>
+    <meta
+      name="description"
+      content="Browse, search, organize, and download college study notes in PDF format."
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  </head>
+  <body>
+    <header class="top-bar">
+      <div class="top-bar-inner">
+        <a href="/index.html" class="brand-mark">Study Hub</a>
+        <nav class="top-nav" aria-label="Main Navigation">
+          <a href="/index.html" class="nav-link active">Browse Notes</a>
+          <a href="/dashboard.html" class="nav-link">Dashboard</a>
+          <a href="/login.html" class="nav-link">Account</a>
+        </nav>
+        <div class="top-actions" id="top-action-container">
+          <a href="/login.html" class="btn btn-primary">Sign In</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="page-header">
+        <div>
+          <h1 class="page-title">Course Study Notes</h1>
+          <p class="page-subtitle">
+            Search peer-uploaded lecture notes, summaries, and unit reference PDFs organized by academic subject.
+          </p>
+        </div>
+        <div class="notes-count tabular" id="notes-count">0 study notes available</div>
+      </section>
+
+      <div id="status-banner" class="status-banner hidden" role="status"></div>
+
+      <section class="toolbar" aria-label="Search and filter study notes">
+        <div class="form-group">
+          <label for="search-input" class="form-label">Search Title or Description</label>
+          <input
+            type="search"
+            id="search-input"
+            class="form-control"
+            placeholder="e.g. Dynamic Programming, Thermodynamics, Eigenvalues..."
+          />
+        </div>
+        <div class="form-group">
+          <label for="category-filter" class="form-label">Subject Category</label>
+          <select id="category-filter" class="form-control">
+            <option value="">All Subjects</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="unit-filter" class="form-label">Unit</label>
+          <input
+            type="text"
+            id="unit-filter"
+            class="form-control"
+            placeholder="e.g. Unit 1"
+          />
+        </div>
+        <div class="form-group">
+          <label for="sort-filter" class="form-label">Sort By</label>
+          <select id="sort-filter" class="form-control">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="title_asc">Title (A-Z)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <span class="form-label">&nbsp;</span>
+          <button type="button" id="reset-filters-btn" class="btn btn-secondary">
+            Reset
+          </button>
+        </div>
+      </section>
+
+      <section id="notes-container" aria-live="polite"></section>
+    </main>
+
+    <div id="pdf-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-modal-title">
+      <div class="modal-window">
+        <div class="modal-header">
+          <h2 id="pdf-modal-title" class="modal-title">Study Note PDF</h2>
+          <div class="note-actions">
+            <a id="pdf-modal-download" href="#" download class="btn btn-primary btn-sm">Download PDF</a>
+            <button type="button" id="pdf-modal-close" class="btn btn-secondary btn-sm">Close</button>
+          </div>
+        </div>
+        <iframe id="pdf-modal-frame" class="modal-frame" title="PDF Document Viewer"></iframe>
+      </div>
+    </div>
+
+    <script type="module" src="/js/index.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+uploads/
+backend/uploads/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.DS_Store
+*.log

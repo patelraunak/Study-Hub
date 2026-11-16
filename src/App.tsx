@@ -1,0 +1,1671 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { FileText } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
+
+interface UserRecord {
+  id: number;
+  name: string;
+  email: string;
+  password_hash: string;
+  role: 'student' | 'admin';
+  created_at: string;
+}
+
+interface CategoryRecord {
+  id: number;
+  name: string;
+}
+
+interface NoteRecord {
+  id: number;
+  title: string;
+  description: string;
+  file_path: string;
+  uploader_id: number;
+  category_id: number;
+  unit: string;
+  created_at: string;
+  uploader_name: string;
+  category_name: string;
+  blob_data_url?: string;
+}
+
+type ActivePage = 'catalog' | 'login' | 'dashboard';
+type AuthMode = 'login' | 'register';
+type SortOption = 'newest' | 'oldest' | 'title_asc';
+
+const USERS_KEY = 'studyhub_db_users';
+const CATEGORIES_KEY = 'studyhub_db_categories';
+const NOTES_KEY = 'studyhub_db_notes';
+const SESSION_USER_KEY = 'studyhub_user';
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+function readStorage<T>(key: string, fallback: T): T {
+  const raw = localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStorage<T>(key: string, value: T): void {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+async function hashPasswordHex(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(`studyhub_bcrypt_salt_${password}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function generateUuidHex(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read PDF file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function validatePdfHeader(file: File): Promise<boolean> {
+  const slice = file.slice(0, 5);
+  const buffer = await slice.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const header = String.fromCharCode(...bytes);
+  return header === '%PDF-';
+}
+
+function dataUrlToUint8Array(dataUrl: string): Uint8Array {
+  const commaIdx = dataUrl.indexOf(',');
+  const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function drawFallbackCanvas(canvas: HTMLCanvasElement, title: string) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = '#1d4ed8';
+  ctx.fillRect(0, 0, w, 10);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 14px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText(title.slice(0, 14), 14, 38);
+
+  ctx.fillStyle = '#cbd5e1';
+  for (let y = 56; y < h - 32; y += 14) {
+    const lineWidth = y % 28 === 0 ? w - 42 : w - 28;
+    ctx.fillRect(14, y, lineWidth, 5);
+  }
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '500 11px "JetBrains Mono", monospace';
+  ctx.fillText('PDF', 14, h - 12);
+}
+
+interface PdfThumbnailProps {
+  dataUrl?: string;
+  title: string;
+  onClick: () => void;
+}
+
+function PdfThumbnail({ dataUrl, title, onClick }: PdfThumbnailProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    drawFallbackCanvas(canvas, title);
+
+    if (!dataUrl) return;
+
+    let cancelled = false;
+
+    async function renderPageOne() {
+      try {
+        const bytes = dataUrlToUint8Array(dataUrl!);
+        const loadingTask = pdfjsLib.getDocument({ data: bytes });
+        const pdf = await loadingTask.promise;
+        if (cancelled) return;
+
+        const page = await pdf.getPage(1);
+        if (cancelled || !canvasRef.current) return;
+
+        const targetW = 168;
+        const targetH = 224;
+        const unscaled = page.getViewport({ scale: 1 });
+        const scale = Math.max(targetW / unscaled.width, targetH / unscaled.height);
+        const viewport = page.getViewport({ scale });
+
+        const targetCanvas = canvasRef.current;
+        targetCanvas.width = Math.floor(viewport.width);
+        targetCanvas.height = Math.floor(viewport.height);
+
+        const context = targetCanvas.getContext('2d');
+        if (!context) return;
+
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
+
+        await page.render({
+          canvasContext: context,
+          viewport,
+          canvas: targetCanvas,
+        }).promise;
+      } catch {
+        if (!cancelled && canvasRef.current) {
+          drawFallbackCanvas(canvasRef.current, title);
+        }
+      }
+    }
+
+    renderPageOne();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUrl, title]);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Open PDF preview"
+      className="w-[84px] h-[112px] shrink-0 border border-slate-200/80 rounded-xl bg-white/80 shadow-xs overflow-hidden flex items-center justify-center cursor-pointer"
+    >
+      <canvas
+        ref={canvasRef}
+        width={168}
+        height={224}
+        aria-label={`First page preview of ${title}`}
+        className="w-full h-full object-cover block bg-white"
+      />
+    </button>
+  );
+}
+
+const glassSurfaceClass =
+  'bg-white/60 backdrop-blur-xl border border-white/70 shadow-lg shadow-slate-900/5 rounded-2xl';
+
+export default function App() {
+  const shouldReduceMotion = useReducedMotion();
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  const [page, setPage] = useState<ActivePage>('catalog');
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+
+  const [users, setUsers] = useState<UserRecord[]>(() => readStorage<UserRecord[]>(USERS_KEY, []));
+  const [categories, setCategories] = useState<CategoryRecord[]>(() =>
+    readStorage<CategoryRecord[]>(CATEGORIES_KEY, [])
+  );
+  const [notes, setNotes] = useState<NoteRecord[]>(() => readStorage<NoteRecord[]>(NOTES_KEY, []));
+  const [currentUser, setCurrentUser] = useState<UserRecord | null>(() =>
+    readStorage<UserRecord | null>(SESSION_USER_KEY, null)
+  );
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [unitFilter, setUnitFilter] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('newest');
+  const [dashboardScope, setDashboardScope] = useState<'all' | 'mine'>('all');
+
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [registerName, setRegisterName] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerRole, setRegisterRole] = useState<'student' | 'admin'>('student');
+  const [authMessage, setAuthMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(
+    null
+  );
+
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadUnit, setUploadUnit] = useState('');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploadCategoryId, setUploadCategoryId] = useState('');
+  const [uploadCategoryName, setUploadCategoryName] = useState('');
+  const [isNewCategoryMode, setIsNewCategoryMode] = useState(categories.length === 0);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<{
+    text: string;
+    type: 'error' | 'success';
+  } | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState<{
+    text: string;
+    type: 'error' | 'success';
+  } | null>(null);
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [activePdfNote, setActivePdfNote] = useState<NoteRecord | null>(null);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 8);
+    };
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    writeStorage(USERS_KEY, users);
+  }, [users]);
+
+  useEffect(() => {
+    writeStorage(CATEGORIES_KEY, categories);
+    if (categories.length === 0) {
+      setIsNewCategoryMode(true);
+    } else if (!uploadCategoryId && categories[0]) {
+      setUploadCategoryId(String(categories[0].id));
+    }
+  }, [categories, uploadCategoryId]);
+
+  useEffect(() => {
+    writeStorage(NOTES_KEY, notes);
+  }, [notes]);
+
+  useEffect(() => {
+    if (currentUser) {
+      writeStorage(SESSION_USER_KEY, currentUser);
+    } else {
+      localStorage.removeItem(SESSION_USER_KEY);
+    }
+  }, [currentUser]);
+
+  const staggerContainerVariants = useMemo(
+    () => ({
+      hidden: { opacity: 0 },
+      show: {
+        opacity: 1,
+        transition: {
+          staggerChildren: shouldReduceMotion ? 0 : 0.08,
+        },
+      },
+    }),
+    [shouldReduceMotion]
+  );
+
+  const fadeUpItemVariants = useMemo(
+    () => ({
+      hidden: { opacity: 0, y: shouldReduceMotion ? 0 : 16 },
+      show: {
+        opacity: 1,
+        y: 0,
+        transition: {
+          duration: shouldReduceMotion ? 0 : 0.38,
+          ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
+        },
+      },
+    }),
+    [shouldReduceMotion]
+  );
+
+  const buttonHoverProps = useMemo(
+    () =>
+      shouldReduceMotion
+        ? {}
+        : {
+            whileHover: {
+              y: -2,
+              boxShadow: '0 8px 22px -4px rgba(37, 99, 235, 0.35)',
+            },
+            whileTap: { scale: 0.97 },
+            transition: { duration: 0.16 },
+          },
+    [shouldReduceMotion]
+  );
+
+  const cardHoverProps = useMemo(
+    () =>
+      shouldReduceMotion
+        ? {}
+        : {
+            whileHover: {
+              y: -4,
+              rotateX: 1.2,
+              rotateY: -1.2,
+              scale: 1.005,
+            },
+            transition: { type: 'spring' as const, stiffness: 320, damping: 24 },
+          },
+    [shouldReduceMotion]
+  );
+
+  const pageTransitionProps = useMemo(
+    () => ({
+      initial: { opacity: 0, y: shouldReduceMotion ? 0 : 10 },
+      animate: { opacity: 1, y: 0 },
+      exit: { opacity: 0, y: shouldReduceMotion ? 0 : -10 },
+      transition: {
+        duration: shouldReduceMotion ? 0 : 0.22,
+        ease: [0.16, 1, 0.3, 1] as [number, number, number, number],
+      },
+    }),
+    [shouldReduceMotion]
+  );
+
+  const filteredNotes = useMemo(() => {
+    return notes
+      .filter((note) => {
+        if (page === 'dashboard' && dashboardScope === 'mine' && currentUser) {
+          if (note.uploader_id !== currentUser.id) return false;
+        }
+        if (selectedCategoryId && String(note.category_id) !== selectedCategoryId) {
+          return false;
+        }
+        if (unitFilter.trim()) {
+          const term = unitFilter.trim().toLowerCase();
+          if (!note.unit.toLowerCase().includes(term)) return false;
+        }
+        if (searchQuery.trim()) {
+          const q = searchQuery.trim().toLowerCase();
+          const inTitle = note.title.toLowerCase().includes(q);
+          const inDesc = (note.description || '').toLowerCase().includes(q);
+          if (!inTitle && !inDesc) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'oldest') {
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        }
+        if (sortBy === 'title_asc') {
+          return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+  }, [
+    notes,
+    page,
+    dashboardScope,
+    currentUser,
+    selectedCategoryId,
+    unitFilter,
+    searchQuery,
+    sortBy,
+  ]);
+
+  function canDelete(note: NoteRecord): boolean {
+    if (!currentUser) return false;
+    return currentUser.id === note.uploader_id || currentUser.role === 'admin';
+  }
+
+  async function handleLogin(event: React.FormEvent) {
+    event.preventDefault();
+    setAuthMessage(null);
+
+    const normalizedEmail = loginEmail.trim().toLowerCase();
+    const user = users.find((u) => u.email.toLowerCase() === normalizedEmail);
+    const passwordHash = await hashPasswordHex(loginPassword);
+
+    if (!user || user.password_hash !== passwordHash) {
+      setAuthMessage({ text: 'Invalid email or password.', type: 'error' });
+      return;
+    }
+
+    setCurrentUser(user);
+    setLoginEmail('');
+    setLoginPassword('');
+    setPage('dashboard');
+  }
+
+  async function handleRegister(event: React.FormEvent) {
+    event.preventDefault();
+    setAuthMessage(null);
+
+    const trimmedName = registerName.trim();
+    const normalizedEmail = registerEmail.trim().toLowerCase();
+
+    if (trimmedName.length < 2) {
+      setAuthMessage({ text: 'Full name must be at least 2 characters.', type: 'error' });
+      return;
+    }
+    if (!normalizedEmail.includes('@')) {
+      setAuthMessage({ text: 'Please enter a valid email address.', type: 'error' });
+      return;
+    }
+    if (registerPassword.length < 6) {
+      setAuthMessage({ text: 'Password must be at least 6 characters.', type: 'error' });
+      return;
+    }
+    if (users.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+      setAuthMessage({ text: 'An account with this email already exists.', type: 'error' });
+      return;
+    }
+
+    const passwordHash = await hashPasswordHex(registerPassword);
+    const nextId = users.length > 0 ? Math.max(...users.map((u) => u.id)) + 1 : 1;
+    const newUser: UserRecord = {
+      id: nextId,
+      name: trimmedName,
+      email: normalizedEmail,
+      password_hash: passwordHash,
+      role: registerRole,
+      created_at: new Date().toISOString(),
+    };
+
+    setUsers((prev) => [...prev, newUser]);
+    setCurrentUser(newUser);
+    setRegisterName('');
+    setRegisterEmail('');
+    setRegisterPassword('');
+    setPage('dashboard');
+  }
+
+  async function handleUploadNote(event: React.FormEvent) {
+    event.preventDefault();
+    setUploadStatus(null);
+
+    if (!currentUser) {
+      setPage('login');
+      return;
+    }
+
+    const cleanTitle = uploadTitle.trim();
+    const cleanUnit = uploadUnit.trim();
+    const cleanDesc = uploadDescription.trim();
+
+    if (!cleanTitle) {
+      setUploadStatus({ text: 'Title is required.', type: 'error' });
+      return;
+    }
+    if (!cleanUnit) {
+      setUploadStatus({ text: 'Unit is required.', type: 'error' });
+      return;
+    }
+    if (!uploadFile) {
+      setUploadStatus({ text: 'Please choose a PDF file to upload.', type: 'error' });
+      return;
+    }
+    if (!uploadFile.name.toLowerCase().endsWith('.pdf')) {
+      setUploadStatus({ text: 'Only PDF files (.pdf) are accepted.', type: 'error' });
+      return;
+    }
+    if (uploadFile.size === 0) {
+      setUploadStatus({ text: 'Uploaded PDF file cannot be empty.', type: 'error' });
+      return;
+    }
+    if (uploadFile.size > MAX_PDF_BYTES) {
+      setUploadStatus({ text: 'File exceeds the maximum allowed size of 10 MB.', type: 'error' });
+      return;
+    }
+
+    const isPdfValid = await validatePdfHeader(uploadFile);
+    if (!isPdfValid) {
+      setUploadStatus({
+        text: 'Invalid PDF header. Only valid PDF files are accepted.',
+        type: 'error',
+      });
+      return;
+    }
+
+    let resolvedCategory: CategoryRecord | undefined;
+    if (isNewCategoryMode) {
+      const catName = uploadCategoryName.trim();
+      if (!catName) {
+        setUploadStatus({ text: 'Please enter a subject category name.', type: 'error' });
+        return;
+      }
+      const existingCat = categories.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+      if (existingCat) {
+        resolvedCategory = existingCat;
+      } else {
+        const nextCatId =
+          categories.length > 0 ? Math.max(...categories.map((c) => c.id)) + 1 : 1;
+        resolvedCategory = { id: nextCatId, name: catName };
+        setCategories((prev) =>
+          [...prev, resolvedCategory!].sort((a, b) => a.name.localeCompare(b.name))
+        );
+      }
+    } else {
+      resolvedCategory = categories.find((c) => String(c.id) === uploadCategoryId);
+      if (!resolvedCategory) {
+        setUploadStatus({ text: 'Please select a subject category.', type: 'error' });
+        return;
+      }
+    }
+
+    const dataUrl = await readFileAsDataUrl(uploadFile);
+    const uuidFilename = `${generateUuidHex()}.pdf`;
+    const nextNoteId = notes.length > 0 ? Math.max(...notes.map((n) => n.id)) + 1 : 1;
+
+    const newNote: NoteRecord = {
+      id: nextNoteId,
+      title: cleanTitle,
+      description: cleanDesc,
+      file_path: `uploads/${uuidFilename}`,
+      uploader_id: currentUser.id,
+      category_id: resolvedCategory.id,
+      unit: cleanUnit,
+      created_at: new Date().toISOString(),
+      uploader_name: currentUser.name,
+      category_name: resolvedCategory.name,
+      blob_data_url: dataUrl,
+    };
+
+    setNotes((prev) => [newNote, ...prev]);
+    setUploadTitle('');
+    setUploadUnit('');
+    setUploadDescription('');
+    setUploadCategoryName('');
+    setUploadFile(null);
+    setUploadCategoryId(String(resolvedCategory.id));
+    setIsNewCategoryMode(false);
+
+    const fileInputEl = document.getElementById('react-upload-file') as HTMLInputElement | null;
+    if (fileInputEl) fileInputEl.value = '';
+
+    setUploadStatus({
+      text: `Saved as ${newNote.file_path} and added to repository.`,
+      type: 'success',
+    });
+  }
+
+  function handleDeleteNote(noteId: number) {
+    const target = notes.find((n) => n.id === noteId);
+    if (!target || !canDelete(target)) return;
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    setPendingDeleteId(null);
+    setCatalogStatus({ text: 'Study note deleted.', type: 'success' });
+  }
+
+  function handleDownloadNote(note: NoteRecord) {
+    if (!note.blob_data_url) return;
+    const link = document.createElement('a');
+    link.href = note.blob_data_url;
+    const cleanName = note.title.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_|_$/g, '');
+    link.download = `${cleanName || 'study_note'}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  const navItems: { id: ActivePage; label: string }[] = [
+    { id: 'catalog', label: 'Browse Notes' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'login', label: 'Account' },
+  ];
+
+  return (
+    <div className="relative min-h-screen text-slate-900 overflow-x-hidden">
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 -z-10 pointer-events-none overflow-hidden bg-slate-50"
+      >
+        <motion.div
+          animate={
+            shouldReduceMotion
+              ? undefined
+              : {
+                  x: [0, 90, -50, 0],
+                  y: [0, -70, 50, 0],
+                  scale: [1, 1.12, 0.94, 1],
+                }
+          }
+          transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute -top-28 -left-24 w-[480px] h-[480px] rounded-full bg-blue-500/15 blur-3xl"
+        />
+        <motion.div
+          animate={
+            shouldReduceMotion
+              ? undefined
+              : {
+                  x: [0, -80, 60, 0],
+                  y: [0, 80, -40, 0],
+                  scale: [1, 0.92, 1.1, 1],
+                }
+          }
+          transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute top-1/4 -right-28 w-[520px] h-[520px] rounded-full bg-indigo-500/15 blur-3xl"
+        />
+        <motion.div
+          animate={
+            shouldReduceMotion
+              ? undefined
+              : {
+                  x: [0, 60, -70, 0],
+                  y: [0, -60, 40, 0],
+                  scale: [1, 1.08, 0.95, 1],
+                }
+          }
+          transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute -bottom-32 left-1/3 w-[500px] h-[500px] rounded-full bg-violet-500/15 blur-3xl"
+        />
+      </div>
+
+      <header
+        className={`sticky top-0 z-30 transition-all duration-200 ${
+          isScrolled
+            ? 'bg-white/70 backdrop-blur-xl border-b border-slate-200/80 shadow-xs'
+            : 'bg-white/40 backdrop-blur-md border-b border-white/50'
+        }`}
+      >
+        <div className="max-w-[1200px] mx-auto px-6 py-3.5 flex items-center justify-between gap-8">
+          <button
+            type="button"
+            onClick={() => {
+              setCatalogStatus(null);
+              setPage('catalog');
+            }}
+            className="text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            Study Hub
+          </button>
+
+          <nav className="flex items-center gap-6 text-sm font-semibold text-slate-600">
+            {navItems.map((item) => {
+              const isActive = page === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setCatalogStatus(null);
+                    if (item.id === 'dashboard' && !currentUser) {
+                      setPage('login');
+                    } else {
+                      setPage(item.id);
+                    }
+                  }}
+                  className={`relative py-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    isActive ? 'text-slate-900' : 'hover:text-slate-900'
+                  }`}
+                >
+                  {item.label}
+                  {isActive && (
+                    <motion.span
+                      layoutId="navbar-active-underline"
+                      className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-700 rounded-full"
+                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex items-center gap-3 shrink-0">
+            {currentUser ? (
+              page === 'dashboard' ? (
+                <motion.button
+                  type="button"
+                  {...buttonHoverProps}
+                  onClick={() => {
+                    setCurrentUser(null);
+                    setPage('login');
+                  }}
+                  className="px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-900 bg-white/80 border border-slate-200 rounded-xl hover:bg-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Sign Out
+                </motion.button>
+              ) : (
+                <motion.button
+                  type="button"
+                  {...buttonHoverProps}
+                  onClick={() => setPage('dashboard')}
+                  className="px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Upload Note
+                </motion.button>
+              )
+            ) : (
+              <motion.button
+                type="button"
+                {...buttonHoverProps}
+                onClick={() => setPage('login')}
+                className="px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                Sign In
+              </motion.button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-[1200px] mx-auto px-6 py-8 pb-16">
+        <AnimatePresence mode="wait">
+          {page === 'catalog' && (
+            <motion.div key="page-catalog" {...pageTransitionProps}>
+              <motion.div
+                variants={staggerContainerVariants}
+                initial="hidden"
+                animate="show"
+              >
+                <motion.section
+                  variants={fadeUpItemVariants}
+                  className="flex flex-wrap items-end justify-between gap-4 pb-5 mb-7 border-b border-slate-200/80"
+                >
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                      Course Study Notes
+                    </h1>
+                    <p className="mt-1.5 text-sm text-slate-600 max-w-2xl">
+                      Search peer-uploaded lecture notes, summaries, and unit reference PDFs
+                      organized by academic subject.
+                    </p>
+                  </div>
+                  <div className="text-xs text-slate-600 font-mono tabular-nums">
+                    {filteredNotes.length}{' '}
+                    {filteredNotes.length === 1 ? 'study note' : 'study notes'} available
+                  </div>
+                </motion.section>
+
+                {catalogStatus && (
+                  <motion.div
+                    variants={fadeUpItemVariants}
+                    className={`mb-4 px-4 py-3 rounded-xl text-xs font-semibold border backdrop-blur-md ${
+                      catalogStatus.type === 'error'
+                        ? 'bg-red-50/80 text-red-700 border-red-200'
+                        : 'bg-green-50/80 text-green-800 border-green-200'
+                    }`}
+                  >
+                    {catalogStatus.text}
+                  </motion.div>
+                )}
+
+                <motion.section
+                  variants={fadeUpItemVariants}
+                  className={`${glassSurfaceClass} p-5 mb-6 grid grid-cols-1 md:grid-cols-5 gap-3 items-end`}
+                >
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor="catalog-search"
+                      className="text-xs font-semibold text-slate-900"
+                    >
+                      Search Title or Description
+                    </label>
+                    <input
+                      id="catalog-search"
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="e.g. Dynamic Programming, Eigenvalues..."
+                      className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor="catalog-category"
+                      className="text-xs font-semibold text-slate-900"
+                    >
+                      Subject Category
+                    </label>
+                    <select
+                      id="catalog-category"
+                      value={selectedCategoryId}
+                      onChange={(e) => setSelectedCategoryId(e.target.value)}
+                      className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                    >
+                      <option value="">All Subjects</option>
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={String(cat.id)}>
+                          {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="catalog-unit" className="text-xs font-semibold text-slate-900">
+                      Unit
+                    </label>
+                    <input
+                      id="catalog-unit"
+                      type="text"
+                      value={unitFilter}
+                      onChange={(e) => setUnitFilter(e.target.value)}
+                      placeholder="e.g. Unit 1"
+                      className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="catalog-sort" className="text-xs font-semibold text-slate-900">
+                      Sort By
+                    </label>
+                    <select
+                      id="catalog-sort"
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as SortOption)}
+                      className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                    >
+                      <option value="newest">Newest First</option>
+                      <option value="oldest">Oldest First</option>
+                      <option value="title_asc">Title (A-Z)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <motion.button
+                      type="button"
+                      {...buttonHoverProps}
+                      onClick={() => {
+                        setSearchQuery('');
+                        setSelectedCategoryId('');
+                        setUnitFilter('');
+                        setSortBy('newest');
+                        setCatalogStatus(null);
+                      }}
+                      className="w-full min-h-[40px] px-4 py-2 text-xs font-semibold text-slate-900 bg-white/80 border border-slate-200/90 rounded-xl hover:bg-white transition-colors cursor-pointer"
+                    >
+                      Reset Filters
+                    </motion.button>
+                  </div>
+                </motion.section>
+
+                {filteredNotes.length === 0 ? (
+                  <motion.div
+                    variants={fadeUpItemVariants}
+                    className={`${glassSurfaceClass} py-14 px-6 text-center`}
+                  >
+                    <motion.div
+                      animate={shouldReduceMotion ? undefined : { y: [0, -7, 0] }}
+                      transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+                      className="mx-auto mb-4 w-12 h-12 rounded-2xl bg-blue-50/90 border border-blue-200/70 flex items-center justify-center text-blue-700 shadow-xs"
+                    >
+                      <FileText className="w-6 h-6" />
+                    </motion.div>
+                    <h2 className="text-base font-bold text-slate-900 mb-1.5">
+                      {searchQuery || selectedCategoryId || unitFilter
+                        ? 'No matching study notes found'
+                        : 'No study notes uploaded yet'}
+                    </h2>
+                    <p className="text-sm text-slate-600 max-w-md mx-auto mb-5">
+                      {searchQuery || selectedCategoryId || unitFilter
+                        ? 'Try clearing your search query or selecting a different subject filter.'
+                        : 'Sign in to upload the first PDF study note and organize course materials by subject and unit.'}
+                    </p>
+                    {searchQuery || selectedCategoryId || unitFilter ? (
+                      <motion.button
+                        type="button"
+                        {...buttonHoverProps}
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedCategoryId('');
+                          setUnitFilter('');
+                        }}
+                        className="px-4 py-2 min-h-[40px] text-xs font-semibold text-slate-900 bg-white/80 border border-slate-200 rounded-xl hover:bg-white transition-colors cursor-pointer"
+                      >
+                        Clear Filters
+                      </motion.button>
+                    ) : (
+                      <motion.button
+                        type="button"
+                        {...buttonHoverProps}
+                        onClick={() => setPage(currentUser ? 'dashboard' : 'login')}
+                        className="px-4 py-2 min-h-[40px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                      >
+                        {currentUser ? 'Go to Dashboard' : 'Sign In to Upload'}
+                      </motion.button>
+                    )}
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    variants={staggerContainerVariants}
+                    className="flex flex-col gap-4"
+                    style={{ perspective: '1000px' }}
+                  >
+                    {filteredNotes.map((note) => (
+                      <motion.article
+                        key={note.id}
+                        variants={fadeUpItemVariants}
+                        {...cardHoverProps}
+                        className={`${glassSurfaceClass} p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-5`}
+                      >
+                        <div className="flex items-start gap-4 min-w-0 flex-1">
+                          <PdfThumbnail
+                            dataUrl={note.blob_data_url}
+                            title={note.title}
+                            onClick={() => setActivePdfNote(note)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mb-1">
+                              <span>{note.category_name}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono">{note.unit}</span>
+                            </div>
+                            <h2 className="text-base font-bold text-slate-900 mb-1">
+                              {note.title}
+                            </h2>
+                            {note.description && (
+                              <p className="text-sm text-slate-600 mb-2 max-w-2xl">
+                                {note.description}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                              <span>Uploaded by {note.uploader_name}</span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono tabular-nums">
+                                {formatDate(note.created_at)}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono">{note.file_path}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                          <motion.button
+                            type="button"
+                            {...buttonHoverProps}
+                            onClick={() => setActivePdfNote(note)}
+                            className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-slate-900 bg-white/80 border border-slate-200 rounded-xl hover:bg-white transition-colors cursor-pointer"
+                          >
+                            Open PDF
+                          </motion.button>
+                          <motion.button
+                            type="button"
+                            {...buttonHoverProps}
+                            onClick={() => handleDownloadNote(note)}
+                            className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                          >
+                            Download
+                          </motion.button>
+                          {canDelete(note) &&
+                            (pendingDeleteId === note.id ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-red-600">Delete?</span>
+                                <motion.button
+                                  type="button"
+                                  {...buttonHoverProps}
+                                  onClick={() => handleDeleteNote(note.id)}
+                                  className="px-2.5 py-1.5 min-h-[34px] text-xs font-semibold text-red-700 bg-red-50/90 border border-red-200 rounded-xl hover:bg-red-100 cursor-pointer"
+                                >
+                                  Confirm
+                                </motion.button>
+                                <motion.button
+                                  type="button"
+                                  {...buttonHoverProps}
+                                  onClick={() => setPendingDeleteId(null)}
+                                  className="px-2.5 py-1.5 min-h-[34px] text-xs font-semibold text-slate-700 bg-white/80 border border-slate-200 rounded-xl hover:bg-white cursor-pointer"
+                                >
+                                  Cancel
+                                </motion.button>
+                              </div>
+                            ) : (
+                              <motion.button
+                                type="button"
+                                {...buttonHoverProps}
+                                onClick={() => setPendingDeleteId(note.id)}
+                                className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-red-700 bg-red-50/90 border border-red-200 rounded-xl hover:bg-red-100 transition-colors cursor-pointer"
+                              >
+                                Delete
+                              </motion.button>
+                            ))}
+                        </div>
+                      </motion.article>
+                    ))}
+                  </motion.div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+
+          {page === 'login' && (
+            <motion.div key="page-login" {...pageTransitionProps} className="max-w-[460px] mx-auto my-8">
+              <div className={`${glassSurfaceClass} p-6`}>
+                <div className="inline-flex p-1 bg-slate-100/80 border border-slate-200/80 rounded-xl gap-1 mb-5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMessage(null);
+                      setAuthMode('login');
+                    }}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      authMode === 'login'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMessage(null);
+                      setAuthMode('register');
+                    }}
+                    className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      authMode === 'register'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Create Account
+                  </button>
+                </div>
+
+                <h1 className="text-lg font-bold text-slate-900 mb-1">
+                  {authMode === 'login' ? 'Sign In to Study Hub' : 'Create a Study Hub Account'}
+                </h1>
+                <p className="text-xs text-slate-600 mb-5">
+                  {authMode === 'login'
+                    ? 'Access your dashboard to upload, organize, and download course PDFs.'
+                    : 'Register with your academic email to upload and manage study notes.'}
+                </p>
+
+                {authMessage && (
+                  <div
+                    className={`mb-4 px-3.5 py-2.5 rounded-xl text-xs font-semibold border ${
+                      authMessage.type === 'error'
+                        ? 'bg-red-50/90 text-red-700 border-red-200'
+                        : 'bg-green-50/90 text-green-800 border-green-200'
+                    }`}
+                  >
+                    {authMessage.text}
+                  </div>
+                )}
+
+                <AnimatePresence mode="wait">
+                  {authMode === 'login' ? (
+                    <motion.form
+                      key="auth-login-form"
+                      {...pageTransitionProps}
+                      onSubmit={handleLogin}
+                      className="flex flex-col gap-4"
+                    >
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="login-email-input" className="text-xs font-semibold">
+                          Email Address
+                        </label>
+                        <input
+                          id="login-email-input"
+                          type="email"
+                          required
+                          value={loginEmail}
+                          onChange={(e) => setLoginEmail(e.target.value)}
+                          placeholder="student@university.edu"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="login-password-input" className="text-xs font-semibold">
+                          Password
+                        </label>
+                        <input
+                          id="login-password-input"
+                          type="password"
+                          required
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          placeholder="Enter your password"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <motion.button
+                        type="submit"
+                        {...buttonHoverProps}
+                        className="w-full min-h-[40px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                      >
+                        Sign In
+                      </motion.button>
+                    </motion.form>
+                  ) : (
+                    <motion.form
+                      key="auth-register-form"
+                      {...pageTransitionProps}
+                      onSubmit={handleRegister}
+                      className="flex flex-col gap-4"
+                    >
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="reg-name-input" className="text-xs font-semibold">
+                          Full Name
+                        </label>
+                        <input
+                          id="reg-name-input"
+                          type="text"
+                          required
+                          value={registerName}
+                          onChange={(e) => setRegisterName(e.target.value)}
+                          placeholder="Alex Rivera"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="reg-email-input" className="text-xs font-semibold">
+                          Email Address
+                        </label>
+                        <input
+                          id="reg-email-input"
+                          type="email"
+                          required
+                          value={registerEmail}
+                          onChange={(e) => setRegisterEmail(e.target.value)}
+                          placeholder="student@university.edu"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="reg-password-input" className="text-xs font-semibold">
+                          Password
+                        </label>
+                        <input
+                          id="reg-password-input"
+                          type="password"
+                          required
+                          minLength={6}
+                          value={registerPassword}
+                          onChange={(e) => setRegisterPassword(e.target.value)}
+                          placeholder="Minimum 6 characters"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="reg-role-select" className="text-xs font-semibold">
+                          Account Role
+                        </label>
+                        <select
+                          id="reg-role-select"
+                          value={registerRole}
+                          onChange={(e) => setRegisterRole(e.target.value as 'student' | 'admin')}
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        >
+                          <option value="student">Student</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+
+                      <motion.button
+                        type="submit"
+                        {...buttonHoverProps}
+                        className="w-full min-h-[40px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                      >
+                        Create Account
+                      </motion.button>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+
+          {page === 'dashboard' && currentUser && (
+            <motion.div key="page-dashboard" {...pageTransitionProps}>
+              <motion.div
+                variants={staggerContainerVariants}
+                initial="hidden"
+                animate="show"
+              >
+                <motion.section
+                  variants={fadeUpItemVariants}
+                  className="flex flex-wrap items-end justify-between gap-4 pb-5 mb-7 border-b border-slate-200/80"
+                >
+                  <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                      Student Workspace
+                    </h1>
+                    <p className="mt-1.5 text-sm text-slate-600 max-w-2xl">
+                      Upload PDF lecture notes, assign subject categories and course units, and
+                      manage repository files.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <span>{currentUser.name}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{currentUser.email}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono">{currentUser.role}</span>
+                  </div>
+                </motion.section>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-7 items-start">
+                  <motion.aside
+                    variants={fadeUpItemVariants}
+                    className={`${glassSurfaceClass} p-6`}
+                  >
+                    <h2 className="text-lg font-bold text-slate-900 mb-1">Upload PDF Note</h2>
+                    <p className="text-xs text-slate-600 mb-5">
+                      PDF documents only, maximum file size 10 MB. Stored under a UUID filename.
+                    </p>
+
+                    {uploadStatus && (
+                      <div
+                        className={`mb-4 px-3.5 py-2.5 rounded-xl text-xs font-semibold border ${
+                          uploadStatus.type === 'error'
+                            ? 'bg-red-50/90 text-red-700 border-red-200'
+                            : 'bg-green-50/90 text-green-800 border-green-200'
+                        }`}
+                      >
+                        {uploadStatus.text}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleUploadNote} className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="react-upload-title" className="text-xs font-semibold">
+                          Note Title
+                        </label>
+                        <input
+                          id="react-upload-title"
+                          type="text"
+                          required
+                          value={uploadTitle}
+                          onChange={(e) => setUploadTitle(e.target.value)}
+                          placeholder="e.g. Graph Traversal & Shortest Paths"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      {!isNewCategoryMode && categories.length > 0 ? (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between">
+                            <label
+                              htmlFor="react-upload-cat-select"
+                              className="text-xs font-semibold"
+                            >
+                              Subject (Category)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setIsNewCategoryMode(true)}
+                              className="text-xs font-semibold text-blue-700 hover:underline cursor-pointer"
+                            >
+                              New Subject
+                            </button>
+                          </div>
+                          <select
+                            id="react-upload-cat-select"
+                            value={uploadCategoryId}
+                            onChange={(e) => setUploadCategoryId(e.target.value)}
+                            className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                          >
+                            {categories.map((cat) => (
+                              <option key={cat.id} value={String(cat.id)}>
+                                {cat.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between">
+                            <label
+                              htmlFor="react-upload-cat-input"
+                              className="text-xs font-semibold"
+                            >
+                              Subject (Category)
+                            </label>
+                            {categories.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setIsNewCategoryMode(false)}
+                                className="text-xs font-semibold text-blue-700 hover:underline cursor-pointer"
+                              >
+                                Choose Existing
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            id="react-upload-cat-input"
+                            type="text"
+                            required
+                            value={uploadCategoryName}
+                            onChange={(e) => setUploadCategoryName(e.target.value)}
+                            placeholder="e.g. Data Structures & Algorithms"
+                            className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="react-upload-unit" className="text-xs font-semibold">
+                          Unit
+                        </label>
+                        <input
+                          id="react-upload-unit"
+                          type="text"
+                          required
+                          value={uploadUnit}
+                          onChange={(e) => setUploadUnit(e.target.value)}
+                          placeholder="e.g. Unit 3"
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="react-upload-desc" className="text-xs font-semibold">
+                          Description
+                        </label>
+                        <textarea
+                          id="react-upload-desc"
+                          rows={3}
+                          value={uploadDescription}
+                          onChange={(e) => setUploadDescription(e.target.value)}
+                          placeholder="Key topics covered, theorems, or exam preparation notes..."
+                          className="w-full px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="react-upload-file" className="text-xs font-semibold">
+                          PDF Document
+                        </label>
+                        <input
+                          id="react-upload-file"
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          required
+                          onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                          className="w-full min-h-[40px] px-3 py-1.5 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                        <span className="text-xs text-slate-500 font-mono">
+                          Accepted format: .pdf · Max size: 10 MB
+                        </span>
+                      </div>
+
+                      <motion.button
+                        type="submit"
+                        {...buttonHoverProps}
+                        className="w-full min-h-[40px] px-4 py-2 text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                      >
+                        Upload PDF Note
+                      </motion.button>
+                    </form>
+                  </motion.aside>
+
+                  <section>
+                    <motion.div
+                      variants={fadeUpItemVariants}
+                      className="flex flex-wrap items-center justify-between gap-3 mb-4"
+                    >
+                      <div className="inline-flex p-1 bg-white/60 backdrop-blur-md border border-white/70 rounded-xl gap-1 shadow-xs">
+                        <button
+                          type="button"
+                          onClick={() => setDashboardScope('all')}
+                          className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                            dashboardScope === 'all'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          All Notes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDashboardScope('mine')}
+                          className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                            dashboardScope === 'mine'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          My Uploads
+                        </button>
+                      </div>
+
+                      <span className="text-xs text-slate-600 font-mono tabular-nums">
+                        {filteredNotes.length} {filteredNotes.length === 1 ? 'note' : 'notes'}
+                      </span>
+                    </motion.div>
+
+                    <motion.div
+                      variants={fadeUpItemVariants}
+                      className={`${glassSurfaceClass} p-4 mb-5 grid grid-cols-1 sm:grid-cols-3 gap-3`}
+                    >
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="dash-search" className="text-xs font-semibold">
+                          Search Notes
+                        </label>
+                        <input
+                          id="dash-search"
+                          type="search"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Filter by title or description..."
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="dash-cat" className="text-xs font-semibold">
+                          Subject Filter
+                        </label>
+                        <select
+                          id="dash-cat"
+                          value={selectedCategoryId}
+                          onChange={(e) => setSelectedCategoryId(e.target.value)}
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        >
+                          <option value="">All Subjects</option>
+                          {categories.map((cat) => (
+                            <option key={cat.id} value={String(cat.id)}>
+                              {cat.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="dash-sort" className="text-xs font-semibold">
+                          Sort By
+                        </label>
+                        <select
+                          id="dash-sort"
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as SortOption)}
+                          className="w-full min-h-[40px] px-3 py-2 text-sm bg-white/80 border border-slate-200/90 rounded-xl"
+                        >
+                          <option value="newest">Newest First</option>
+                          <option value="oldest">Oldest First</option>
+                          <option value="title_asc">Title (A-Z)</option>
+                        </select>
+                      </div>
+                    </motion.div>
+
+                    {filteredNotes.length === 0 ? (
+                      <motion.div
+                        variants={fadeUpItemVariants}
+                        className={`${glassSurfaceClass} py-12 px-6 text-center`}
+                      >
+                        <h3 className="text-base font-bold text-slate-900 mb-1">
+                          No study notes found
+                        </h3>
+                        <p className="text-sm text-slate-600 max-w-md mx-auto">
+                          {dashboardScope === 'mine'
+                            ? 'You have not uploaded any PDF notes matching the current filters yet.'
+                            : 'Use the upload form on the left to publish a PDF study note.'}
+                        </p>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        variants={staggerContainerVariants}
+                        className="flex flex-col gap-4"
+                        style={{ perspective: '1000px' }}
+                      >
+                        {filteredNotes.map((note) => (
+                          <motion.article
+                            key={note.id}
+                            variants={fadeUpItemVariants}
+                            {...cardHoverProps}
+                            className={`${glassSurfaceClass} p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4`}
+                          >
+                            <div className="flex items-start gap-4 min-w-0 flex-1">
+                              <PdfThumbnail
+                                dataUrl={note.blob_data_url}
+                                title={note.title}
+                                onClick={() => setActivePdfNote(note)}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mb-1">
+                                  <span>{note.category_name}</span>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="font-mono">{note.unit}</span>
+                                </div>
+                                <h3 className="text-base font-bold text-slate-900 mb-1">
+                                  {note.title}
+                                </h3>
+                                {note.description && (
+                                  <p className="text-sm text-slate-600 mb-2">{note.description}</p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                  <span>Uploaded by {note.uploader_name}</span>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="font-mono tabular-nums">
+                                    {formatDate(note.created_at)}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="font-mono">{note.file_path}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                              <motion.button
+                                type="button"
+                                {...buttonHoverProps}
+                                onClick={() => setActivePdfNote(note)}
+                                className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-slate-900 bg-white/80 border border-slate-200 rounded-xl hover:bg-white transition-colors cursor-pointer"
+                              >
+                                Open PDF
+                              </motion.button>
+                              <motion.button
+                                type="button"
+                                {...buttonHoverProps}
+                                onClick={() => handleDownloadNote(note)}
+                                className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 transition-colors cursor-pointer"
+                              >
+                                Download
+                              </motion.button>
+                              {canDelete(note) &&
+                                (pendingDeleteId === note.id ? (
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <span className="text-xs font-semibold text-red-600">
+                                      Delete?
+                                    </span>
+                                    <motion.button
+                                      type="button"
+                                      {...buttonHoverProps}
+                                      onClick={() => handleDeleteNote(note.id)}
+                                      className="px-2.5 py-1.5 min-h-[34px] text-xs font-semibold text-red-700 bg-red-50/90 border border-red-200 rounded-xl hover:bg-red-100 cursor-pointer"
+                                    >
+                                      Confirm
+                                    </motion.button>
+                                    <motion.button
+                                      type="button"
+                                      {...buttonHoverProps}
+                                      onClick={() => setPendingDeleteId(null)}
+                                      className="px-2.5 py-1.5 min-h-[34px] text-xs font-semibold text-slate-700 bg-white/80 border border-slate-200 rounded-xl hover:bg-white cursor-pointer"
+                                    >
+                                      Cancel
+                                    </motion.button>
+                                  </div>
+                                ) : (
+                                  <motion.button
+                                    type="button"
+                                    {...buttonHoverProps}
+                                    onClick={() => setPendingDeleteId(note.id)}
+                                    className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-red-700 bg-red-50/90 border border-red-200 rounded-xl hover:bg-red-100 transition-colors cursor-pointer"
+                                  >
+                                    Delete
+                                  </motion.button>
+                                ))}
+                            </div>
+                          </motion.article>
+                        ))}
+                      </motion.div>
+                    )}
+                  </section>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {activePdfNote && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setActivePdfNote(null);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              className="bg-white/90 backdrop-blur-xl border border-white/80 shadow-2xl rounded-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-5 py-3.5 border-b border-slate-200/80 flex items-center justify-between gap-4">
+                <h2 className="text-sm font-bold text-slate-900 truncate">
+                  {activePdfNote.title} ({activePdfNote.category_name} · {activePdfNote.unit})
+                </h2>
+                <div className="flex items-center gap-2 shrink-0">
+                  <motion.button
+                    type="button"
+                    {...buttonHoverProps}
+                    onClick={() => handleDownloadNote(activePdfNote)}
+                    className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-white bg-blue-700 rounded-xl hover:bg-blue-800 cursor-pointer"
+                  >
+                    Download PDF
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    {...buttonHoverProps}
+                    onClick={() => setActivePdfNote(null)}
+                    className="px-3 py-1.5 min-h-[34px] text-xs font-semibold text-slate-900 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 cursor-pointer"
+                  >
+                    Close
+                  </motion.button>
+                </div>
+              </div>
+              <iframe
+                src={activePdfNote.blob_data_url}
+                title={activePdfNote.title}
+                className="flex-1 w-full bg-slate-100 border-0"
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

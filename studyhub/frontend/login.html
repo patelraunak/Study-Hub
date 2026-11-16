@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign In — Study Hub</title>
+    <meta
+      name="description"
+      content="Sign in or register on Study Hub to upload and organize PDF study notes."
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <header class="top-bar">
+      <div class="top-bar-inner">
+        <a href="/index.html" class="brand-mark">Study Hub</a>
+        <nav class="top-nav" aria-label="Main Navigation">
+          <a href="/index.html" class="nav-link">Browse Notes</a>
+          <a href="/dashboard.html" class="nav-link">Dashboard</a>
+          <a href="/login.html" class="nav-link active">Account</a>
+        </nav>
+        <div class="top-actions">
+          <a href="/index.html" class="btn btn-secondary">Back to Catalog</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="auth-wrapper">
+        <div class="panel">
+          <div class="auth-header">
+            <div class="segmented-control" role="tablist" aria-label="Authentication Mode">
+              <button type="button" id="tab-login" class="segment-btn active" role="tab">
+                Sign In
+              </button>
+              <button type="button" id="tab-register" class="segment-btn" role="tab">
+                Create Account
+              </button>
+            </div>
+          </div>
+
+          <h1 id="auth-title" class="panel-title">Sign In to Study Hub</h1>
+          <p id="auth-subtitle" class="panel-description">
+            Access your dashboard to upload, organize, and download course PDFs.
+          </p>
+
+          <div id="auth-status" class="status-banner hidden" role="alert"></div>
+
+          <form id="login-form" class="form-stack" novalidate>
+            <div class="form-group">
+              <label for="login-email" class="form-label">Email Address</label>
+              <input
+                type="email"
+                id="login-email"
+                class="form-control"
+                required
+                autocomplete="email"
+                placeholder="student@university.edu"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="login-password" class="form-label">Password</label>
+              <input
+                type="password"
+                id="login-password"
+                class="form-control"
+                required
+                autocomplete="current-password"
+                placeholder="Enter your password"
+              />
+            </div>
+
+            <button type="submit" id="login-submit-btn" class="btn btn-primary">
+              Sign In
+            </button>
+          </form>
+
+          <form id="register-form" class="form-stack hidden" novalidate>
+            <div class="form-group">
+              <label for="register-name" class="form-label">Full Name</label>
+              <input
+                type="text"
+                id="register-name"
+                class="form-control"
+                required
+                minlength="2"
+                maxlength="120"
+                autocomplete="name"
+                placeholder="Alex Rivera"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="register-email" class="form-label">Email Address</label>
+              <input
+                type="email"
+                id="register-email"
+                class="form-control"
+                required
+                autocomplete="email"
+                placeholder="student@university.edu"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="register-password" class="form-label">Password</label>
+              <input
+                type="password"
+                id="register-password"
+                class="form-control"
+                required
+                minlength="6"
+                autocomplete="new-password"
+                placeholder="Minimum 6 characters"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="register-role" class="form-label">Account Role</label>
+              <select id="register-role" class="form-control">
+                <option value="student">Student</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <button type="submit" id="register-submit-btn" class="btn btn-primary">
+              Create Account
+            </button>
+          </form>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="/js/login.js"></script>
+  </body>
+</html>

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard — Study Hub</title>
+    <meta
+      name="description"
+      content="Upload PDF study notes, organize by subject category and unit, and manage your uploads."
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  </head>
+  <body>
+    <header class="top-bar">
+      <div class="top-bar-inner">
+        <a href="/index.html" class="brand-mark">Study Hub</a>
+        <nav class="top-nav" aria-label="Main Navigation">
+          <a href="/index.html" class="nav-link">Browse Notes</a>
+          <a href="/dashboard.html" class="nav-link active">Dashboard</a>
+          <a href="/login.html" class="nav-link">Account</a>
+        </nav>
+        <div class="top-actions">
+          <button type="button" id="logout-btn" class="btn btn-secondary">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="page-header">
+        <div>
+          <h1 class="page-title">Student Workspace</h1>
+          <p class="page-subtitle">
+            Upload PDF lecture notes, assign subject categories and course units, and manage repository files.
+          </p>
+        </div>
+        <div id="user-summary" class="user-meta"></div>
+      </section>
+
+      <div class="dashboard-grid">
+        <aside class="panel" aria-labelledby="upload-heading">
+          <h2 id="upload-heading" class="panel-title">Upload PDF Note</h2>
+          <p class="panel-description">
+            PDF documents only, maximum file size 10 MB. Stored under a unique identifier on the server.
+          </p>
+
+          <div id="upload-status" class="status-banner hidden" role="status"></div>
+
+          <form id="upload-form" class="form-stack" novalidate>
+            <div class="form-group">
+              <label for="upload-title" class="form-label">Note Title</label>
+              <input
+                type="text"
+                id="upload-title"
+                class="form-control"
+                required
+                maxlength="200"
+                placeholder="e.g. Graph Traversal & Shortest Paths"
+              />
+            </div>
+
+            <div id="category-select-group" class="form-group">
+              <div class="inline-row">
+                <label for="upload-category-select" class="form-label">Subject (Category)</label>
+                <button type="button" id="toggle-new-category-btn" class="text-btn">
+                  New Subject
+                </button>
+              </div>
+              <select id="upload-category-select" class="form-control"></select>
+            </div>
+
+            <div id="category-input-group" class="form-group hidden">
+              <div class="inline-row">
+                <label for="upload-category-input" class="form-label">Subject (Category)</label>
+                <button type="button" id="toggle-existing-category-btn" class="text-btn">
+                  Choose Existing
+                </button>
+              </div>
+              <input
+                type="text"
+                id="upload-category-input"
+                class="form-control"
+                maxlength="120"
+                placeholder="e.g. Data Structures & Algorithms"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="upload-unit" class="form-label">Unit</label>
+              <input
+                type="text"
+                id="upload-unit"
+                class="form-control"
+                required
+                maxlength="100"
+                placeholder="e.g. Unit 3"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="upload-description" class="form-label">Description</label>
+              <textarea
+                id="upload-description"
+                class="form-control"
+                placeholder="Key topics covered, theorems, or exam preparation notes..."
+              ></textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="upload-file" class="form-label">PDF Document</label>
+              <input
+                type="file"
+                id="upload-file"
+                class="form-control"
+                accept=".pdf,application/pdf"
+                required
+              />
+              <span class="form-hint mono">Accepted format: .pdf · Max size: 10 MB</span>
+            </div>
+
+            <button type="submit" id="upload-submit-btn" class="btn btn-primary">
+              Upload PDF Note
+            </button>
+          </form>
+        </aside>
+
+        <section aria-labelledby="repository-heading">
+          <div class="notes-header-row">
+            <div class="segmented-control" role="tablist" aria-label="Note Scope">
+              <button type="button" id="filter-all-btn" class="segment-btn active" role="tab">
+                All Notes
+              </button>
+              <button type="button" id="filter-mine-btn" class="segment-btn" role="tab">
+                My Uploads
+              </button>
+            </div>
+            <span id="dashboard-notes-count" class="notes-count tabular">0 notes</span>
+          </div>
+
+          <div class="toolbar" style="grid-template-columns: 1fr 190px 170px;">
+            <div class="form-group">
+              <label for="dashboard-search" class="form-label">Search Notes</label>
+              <input
+                type="search"
+                id="dashboard-search"
+                class="form-control"
+                placeholder="Filter by title or description..."
+              />
+            </div>
+            <div class="form-group">
+              <label for="dashboard-category-filter" class="form-label">Subject Filter</label>
+              <select id="dashboard-category-filter" class="form-control">
+                <option value="">All Subjects</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="dashboard-sort-filter" class="form-label">Sort By</label>
+              <select id="dashboard-sort-filter" class="form-control">
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="title_asc">Title (A-Z)</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="dashboard-status" class="status-banner hidden" role="status"></div>
+          <div id="dashboard-notes-container" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+
+    <div id="pdf-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pdf-modal-title">
+      <div class="modal-window">
+        <div class="modal-header">
+          <h2 id="pdf-modal-title" class="modal-title">Study Note PDF</h2>
+          <div class="note-actions">
+            <a id="pdf-modal-download" href="#" download class="btn btn-primary btn-sm">Download PDF</a>
+            <button type="button" id="pdf-modal-close" class="btn btn-secondary btn-sm">Close</button>
+          </div>
+        </div>
+        <iframe id="pdf-modal-frame" class="modal-frame" title="PDF Document Viewer"></iframe>
+      </div>
+    </div>
+
+    <script type="module" src="/js/dashboard.js"></script>
+  </body>
+</html>
